@@ -1,0 +1,72 @@
+# Runs the pipeline every day, and lets you run it by hand from the Actions tab.
+name: Daily pipeline
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # every day at 14:00 UTC (morning in Alberta)
+  workflow_dispatch:         # adds a "Run workflow" button on GitHub
+    inputs:
+      start:
+        description: "First date YYYY-MM-DD (blank = yesterday)"
+        required: false
+      end:
+        description: "Last date YYYY-MM-DD (blank = same as start)"
+        required: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      # GitHub runners start empty every time. To keep a growing database, we
+      # restore the most recent saved copy from the Actions cache (if any).
+      - name: Restore database from previous runs
+        uses: actions/cache/restore@v4
+        with:
+          path: data/alberta_power.db
+          key: pool-price-db-${{ github.run_id }}
+          restore-keys: pool-price-db-
+
+      - name: Run pipeline
+        env:
+          AESO_API_KEY: ${{ secrets.AESO_API_KEY }}   # stored under Settings > Secrets
+          START: ${{ inputs.start }}                  # passed via env, not pasted into the script
+          END: ${{ inputs.end }}
+        run: |
+          ARGS=""
+          if [ -n "$START" ]; then ARGS="$ARGS --start $START"; fi
+          if [ -n "$END" ]; then ARGS="$ARGS --end $END"; fi
+          python pipeline.py $ARGS
+
+      - name: Save database for the next run
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: data/alberta_power.db
+          key: pool-price-db-${{ github.run_id }}
+
+      # Logs, the checks report and the database can be downloaded from the run page,
+      # even when the run fails.
+      - name: Upload logs and database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-output-${{ github.run_id }}
+          path: |
+            logs/
+            data/alberta_power.db
+          if-no-files-found: warn

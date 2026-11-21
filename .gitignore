@@ -1,0 +1,14 @@
+# Secrets: never commit your API key
+.env
+
+# Generated data and logs
+*.db
+logs/
+data/
+
+# Python clutter
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
